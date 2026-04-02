@@ -25,7 +25,7 @@ export async function getAccountWithTransactions(accountId) {
 
   if (!user) throw new Error("User not found");
 
-  const account = await db.account.findUnique({
+  const account = await db.account.findFirst({
     where: {
       id: accountId,
       userId: user.id,
@@ -134,16 +134,27 @@ export async function updateDefaultAccount(accountId) {
     });
 
     // Then set the new default account
-    const account = await db.account.update({
+    const account = await db.account.findFirst({
       where: {
         id: accountId,
         userId: user.id,
       },
+    });
+
+    if (!account) {
+      throw new Error("Account not found");
+    }
+
+    await db.account.update({
+      where: { id: accountId },
       data: { isDefault: true },
     });
 
     revalidatePath("/dashboard");
-    return { success: true, data: serializeTransaction(account) };
+    return {
+      success: true,
+      data: serializeDecimal({ ...account, isDefault: true }),
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }

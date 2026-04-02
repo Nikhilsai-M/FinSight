@@ -76,7 +76,7 @@ export function AccountChart({ transactions }) {
   }, [filteredData]);
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-7">
         <CardTitle className="text-base font-normal">
           Transaction Overview
@@ -121,7 +121,7 @@ export function AccountChart({ transactions }) {
             </p>
           </div>
         </div>
-        <div className="h-[300px]">
+        <div className="h-[300px] min-w-0">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={filteredData}

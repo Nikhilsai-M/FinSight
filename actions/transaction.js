@@ -54,7 +54,7 @@ export async function createTransaction(data) {
       throw new Error("User not found");
     }
 
-    const account = await db.account.findUnique({
+    const account = await db.account.findFirst({
       where: {
         id: data.accountId,
         userId: user.id,
@@ -109,7 +109,7 @@ export async function getTransaction(id) {
 
   if (!user) throw new Error("User not found");
 
-  const transaction = await db.transaction.findUnique({
+  const transaction = await db.transaction.findFirst({
     where: {
       id,
       userId: user.id,
@@ -133,7 +133,7 @@ export async function updateTransaction(id, data) {
     if (!user) throw new Error("User not found");
 
     // Get original transaction to calculate balance change
-    const originalTransaction = await db.transaction.findUnique({
+    const originalTransaction = await db.transaction.findFirst({
       where: {
         id,
         userId: user.id,
@@ -144,6 +144,15 @@ export async function updateTransaction(id, data) {
     });
 
     if (!originalTransaction) throw new Error("Transaction not found");
+
+    const targetAccount = await db.account.findFirst({
+      where: {
+        id: data.accountId,
+        userId: user.id,
+      },
+    });
+
+    if (!targetAccount) throw new Error("Account not found");
 
     // Calculate balance changes
     const oldBalanceChange =
@@ -159,10 +168,7 @@ export async function updateTransaction(id, data) {
     // Update transaction and account balance in a transaction
     const transaction = await db.$transaction(async (tx) => {
       const updated = await tx.transaction.update({
-        where: {
-          id,
-          userId: user.id,
-        },
+        where: { id },
         data: {
           ...data,
           nextRecurringDate:
@@ -172,15 +178,34 @@ export async function updateTransaction(id, data) {
         },
       });
 
-      // Update account balance
-      await tx.account.update({
-        where: { id: data.accountId },
-        data: {
-          balance: {
-            increment: netBalanceChange,
+      if (originalTransaction.accountId === data.accountId) {
+        await tx.account.update({
+          where: { id: data.accountId },
+          data: {
+            balance: {
+              increment: netBalanceChange,
+            },
           },
-        },
-      });
+        });
+      } else {
+        await tx.account.update({
+          where: { id: originalTransaction.accountId },
+          data: {
+            balance: {
+              increment: -oldBalanceChange,
+            },
+          },
+        });
+
+        await tx.account.update({
+          where: { id: data.accountId },
+          data: {
+            balance: {
+              increment: newBalanceChange,
+            },
+          },
+        });
+      }
 
       return updated;
     });

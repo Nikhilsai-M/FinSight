@@ -82,7 +82,7 @@ export function AccountChart({ transactions }) {
           Transaction Overview
         </CardTitle>
         <Select defaultValue={dateRange} onValueChange={setDateRange}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="w-35">
             <SelectValue placeholder="Select range" />
           </SelectTrigger>
           <SelectContent>
@@ -121,7 +121,7 @@ export function AccountChart({ transactions }) {
             </p>
           </div>
         </div>
-        <div className="h-[300px] min-w-0">
+        <div className="h-75 min-w-0">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={filteredData}

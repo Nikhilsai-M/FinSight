@@ -207,7 +207,7 @@ export function NoPaginationTransactionTable({ transactions }) {
               setRecurringFilter(value);
             }}
           >
-            <SelectTrigger className="w-[130px]">
+            <SelectTrigger className="w-32.5">
               <SelectValue placeholder="All Transactions" />
             </SelectTrigger>
             <SelectContent>
@@ -248,7 +248,7 @@ export function NoPaginationTransactionTable({ transactions }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[50px]">
+              <TableHead className="w-12.5">
                 <Checkbox
                   checked={
                     selectedIds.length ===
@@ -302,7 +302,7 @@ export function NoPaginationTransactionTable({ transactions }) {
                 </div>
               </TableHead>
               <TableHead>Recurring</TableHead>
-              <TableHead className="w-[50px]" />
+              <TableHead className="w-12.5" />
             </TableRow>
           </TableHeader>
           <TableBody>

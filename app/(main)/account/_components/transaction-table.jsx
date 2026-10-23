@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -50,7 +50,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { categoryColors } from "@/data/categories";
-import { bulkDeleteTransactions } from "@/actions/account";
+import { bulkDeleteTransactions, getAccountTransactions } from "@/actions/account";
 import useFetch from "@/hooks/use-fetch";
 import { BarLoader } from "react-spinners";
 import { useRouter } from "next/navigation";
@@ -64,7 +64,9 @@ const RECURRING_INTERVALS = {
   YEARLY: "Yearly",
 };
 
-export function TransactionTable({ transactions }) {
+export function TransactionTable({ accountId, initialTransactions, initialTotal }) {
+  const [transactions, setTransactions] = useState(initialTransactions);
+  const [total, setTotal] = useState(initialTotal);
   const [selectedIds, setSelectedIds] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     field: "date",
@@ -76,66 +78,29 @@ export function TransactionTable({ transactions }) {
   const [currentPage, setCurrentPage] = useState(1);
   const router = useRouter();
 
-  // Memoized filtered and sorted transactions
-  const filteredAndSortedTransactions = useMemo(() => {
-    let result = [...transactions];
+  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  const paginatedTransactions = transactions;
 
-    // Apply search filter
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      result = result.filter((transaction) =>
-        transaction.description?.toLowerCase().includes(searchLower)
-      );
-    }
-
-    // Apply type filter
-    if (typeFilter) {
-      result = result.filter((transaction) => transaction.type === typeFilter);
-    }
-
-    // Apply recurring filter
-    if (recurringFilter) {
-      result = result.filter((transaction) => {
-        if (recurringFilter === "recurring") return transaction.isRecurring;
-        return !transaction.isRecurring;
-      });
-    }
-
-    // Apply sorting
-    result.sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortConfig.field) {
-        case "date":
-          comparison = new Date(a.date) - new Date(b.date);
-          break;
-        case "amount":
-          comparison = a.amount - b.amount;
-          break;
-        case "category":
-          comparison = a.category.localeCompare(b.category);
-          break;
-        default:
-          comparison = 0;
-      }
-
-      return sortConfig.direction === "asc" ? comparison : -comparison;
-    });
-
-    return result;
-  }, [transactions, searchTerm, typeFilter, recurringFilter, sortConfig]);
-
-  // Pagination calculations
-  const totalPages = Math.ceil(
-    filteredAndSortedTransactions.length / ITEMS_PER_PAGE
-  );
-  const paginatedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredAndSortedTransactions.slice(
-      startIndex,
-      startIndex + ITEMS_PER_PAGE
-    );
-  }, [filteredAndSortedTransactions, currentPage]);
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      getAccountTransactions(accountId, {
+        page: currentPage,
+        field: sortConfig.field,
+        direction: sortConfig.direction,
+        search: searchTerm,
+        type: typeFilter,
+        recurring: recurringFilter,
+      }).then((result) => {
+        if (!cancelled) {
+          setTransactions(result.transactions);
+          setTotal(result.total);
+          setSelectedIds([]);
+        }
+      }).catch(() => { if (!cancelled) toast.error("Could not load transactions"); });
+    }, searchTerm ? 250 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [accountId, currentPage, sortConfig, searchTerm, typeFilter, recurringFilter, initialTransactions]);
 
   const handleSort = (field) => {
     setSortConfig((current) => ({
@@ -175,12 +140,16 @@ export function TransactionTable({ transactions }) {
     )
       return;
 
-    deleteFn(selectedIds);
+    await deleteFn(selectedIds);
+    setCurrentPage(1);
+    router.refresh();
   };
 
   useEffect(() => {
-    if (deleted && !deleteLoading) {
-      toast.error("Transactions deleted successfully");
+    if (deleted?.success && !deleteLoading) {
+      toast.success("Transactions deleted successfully");
+    } else if (deleted?.success === false && !deleteLoading) {
+      toast.error(deleted.error || "Could not delete transactions");
     }
   }, [deleted, deleteLoading]);
 
@@ -437,7 +406,7 @@ export function TransactionTable({ transactions }) {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive"
-                          onClick={() => deleteFn([transaction.id])}
+                          onClick={async () => { await deleteFn([transaction.id]); router.refresh(); }}
                         >
                           Delete
                         </DropdownMenuItem>

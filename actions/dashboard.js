@@ -5,6 +5,7 @@ import { db } from "@/lib/prisma";
 import { request } from "@arcjet/next";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { accountInput, runSerializable, utcMonthBounds } from "@/lib/finance";
 
 const serializeTransaction = (obj) => {
   const serialized = { ...obj };
@@ -90,38 +91,17 @@ export async function createAccount(data) {
       throw new Error("User not found");
     }
 
-    // Convert balance to float before saving
-    const balanceFloat = parseFloat(data.balance);
-    if (isNaN(balanceFloat)) {
-      throw new Error("Invalid balance amount");
-    }
-
-    // Check if this is the user's first account
-    const existingAccounts = await db.account.findMany({
-      where: { userId: user.id },
-    });
-
-    // If it's the first account, make it default regardless of user input
-    // If not, use the user's preference
-    const shouldBeDefault =
-      existingAccounts.length === 0 ? true : data.isDefault;
-
-    // If this account should be default, unset other default accounts
-    if (shouldBeDefault) {
-      await db.account.updateMany({
-        where: { userId: user.id, isDefault: true },
-        data: { isDefault: false },
+    const input = accountInput.parse(data);
+    const account = await runSerializable(db, async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id} FOR UPDATE`;
+      const existingCount = await tx.account.count({ where: { userId: user.id } });
+      const shouldBeDefault = existingCount === 0 || input.isDefault;
+      if (shouldBeDefault) {
+        await tx.account.updateMany({ where: { userId: user.id, isDefault: true }, data: { isDefault: false } });
+      }
+      return tx.account.create({
+        data: { ...input, userId: user.id, isDefault: shouldBeDefault },
       });
-    }
-
-    // Create new account
-    const account = await db.account.create({
-      data: {
-        ...data,
-        balance: balanceFloat,
-        userId: user.id,
-        isDefault: shouldBeDefault, // Override the isDefault based on our logic
-      },
     });
 
     // Serialize the account before returning
@@ -146,11 +126,22 @@ export async function getDashboardData() {
     throw new Error("User not found");
   }
 
-  // Get all user transactions
-  const transactions = await db.transaction.findMany({
-    where: { userId: user.id },
-    orderBy: { date: "desc" },
-  });
-
-  return transactions.map(serializeTransaction);
+  const accounts = await db.account.findMany({ where: { userId: user.id }, select: { id: true } });
+  const { start, end } = utcMonthBounds(new Date());
+  const [groups, recentLists] = await Promise.all([
+    db.transaction.groupBy({
+      by: ["accountId", "category"],
+      where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end } },
+      _sum: { amount: true },
+    }),
+    Promise.all(accounts.map((account) => db.transaction.findMany({
+      where: { userId: user.id, accountId: account.id },
+      orderBy: [{ date: "desc" }, { id: "desc" }],
+      take: 5,
+    }))),
+  ]);
+  return Object.fromEntries(accounts.map((account, index) => [account.id, {
+    recent: recentLists[index].map(serializeTransaction),
+    categories: groups.filter((group) => group.accountId === account.id).map((group) => ({ name: group.category, value: group._sum.amount?.toNumber() ?? 0 })),
+  }]));
 }

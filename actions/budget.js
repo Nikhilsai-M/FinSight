@@ -3,6 +3,7 @@
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { positiveMoney, utcMonthBounds } from "@/lib/finance";
 
 export async function getCurrentBudget(accountId) {
   try {
@@ -24,25 +25,15 @@ export async function getCurrentBudget(accountId) {
     });
 
     // Get current month's expenses
-    const currentDate = new Date();
-    const startOfMonth = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth(),
-      1
-    );
-    const endOfMonth = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth() + 1,
-      0
-    );
+    const { start, end } = utcMonthBounds(new Date());
 
     const expenses = await db.transaction.aggregate({
       where: {
         userId: user.id,
         type: "EXPENSE",
         date: {
-          gte: startOfMonth,
-          lte: endOfMonth,
+          gte: start,
+          lt: end,
         },
         accountId,
       },
@@ -74,17 +65,18 @@ export async function updateBudget(amount) {
 
     if (!user) throw new Error("User not found");
 
+    const validatedAmount = positiveMoney.parse(amount);
     // Update or create budget
     const budget = await db.budget.upsert({
       where: {
         userId: user.id,
       },
       update: {
-        amount,
+        amount: validatedAmount,
       },
       create: {
         userId: user.id,
-        amount,
+        amount: validatedAmount,
       },
     });
 

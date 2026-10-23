@@ -82,10 +82,7 @@ export function AddTransactionForm({
   } = useFetch(editMode ? updateTransaction : createTransaction);
 
   const onSubmit = (data) => {
-    const formData = {
-      ...data,
-      amount: parseFloat(data.amount),
-    };
+    const formData = data;
 
     if (editMode) {
       transactionFn(editId, formData);

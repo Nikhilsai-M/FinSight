@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   BarChart,
   Bar,
@@ -11,7 +11,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { format, subDays, startOfDay, endOfDay } from "date-fns";
+import { getAccountChartData } from "@/actions/account";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -29,40 +29,18 @@ const DATE_RANGES = {
   ALL: { label: "All Time", days: null },
 };
 
-export function AccountChart({ transactions }) {
+export function AccountChart({ accountId, initialData }) {
   const [dateRange, setDateRange] = useState("1M");
-
-  const filteredData = useMemo(() => {
-    const range = DATE_RANGES[dateRange];
-    const now = new Date();
-    const startDate = range.days
-      ? startOfDay(subDays(now, range.days))
-      : startOfDay(new Date(0));
-
-    // Filter transactions within date range
-    const filtered = transactions.filter(
-      (t) => new Date(t.date) >= startDate && new Date(t.date) <= endOfDay(now)
-    );
-
-    // Group transactions by date
-    const grouped = filtered.reduce((acc, transaction) => {
-      const date = format(new Date(transaction.date), "MMM dd");
-      if (!acc[date]) {
-        acc[date] = { date, income: 0, expense: 0 };
-      }
-      if (transaction.type === "INCOME") {
-        acc[date].income += transaction.amount;
-      } else {
-        acc[date].expense += transaction.amount;
-      }
-      return acc;
-    }, {});
-
-    // Convert to array and sort by date
-    return Object.values(grouped).sort(
-      (a, b) => new Date(a.date) - new Date(b.date)
-    );
-  }, [transactions, dateRange]);
+  const [remoteData, setRemoteData] = useState([]);
+  const filteredData = dateRange === "1M" ? initialData : remoteData;
+  useEffect(() => {
+    if (dateRange === "1M") return;
+    let cancelled = false;
+    getAccountChartData(accountId, dateRange)
+      .then((rows) => { if (!cancelled) setRemoteData(rows); })
+      .catch(() => { if (!cancelled) setRemoteData([]); });
+    return () => { cancelled = true; };
+  }, [accountId, dateRange, initialData]);
 
   // Calculate totals for the selected period
   const totals = useMemo(() => {
@@ -138,10 +116,10 @@ export function AccountChart({ transactions }) {
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(value) => `₹{value}`}
+                tickFormatter={(value) => `₹${value}`}
               />
               <Tooltip
-                formatter={(value) => [`₹{value}`, undefined]}
+                formatter={(value) => [`₹${value}`, undefined]}
                 contentStyle={{
                   backgroundColor: "hsl(var(--popover))",
                   border: "1px solid hsl(var(--border))",

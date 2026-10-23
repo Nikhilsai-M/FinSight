@@ -41,7 +41,7 @@ export function BudgetProgress({ initialBudget, currentExpenses }) {
       return;
     }
 
-    const updatedBudget = await updateBudgetFn(amount);
+    const updatedBudget = await updateBudgetFn(newBudget);
 
     if (updatedBudget?.success) {
       setIsEditing(false);

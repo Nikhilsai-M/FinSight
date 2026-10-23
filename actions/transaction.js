@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import aj from "@/lib/arcjet";
 import { request } from "@arcjet/next";
+import { transactionInput, receiptResult, signedAmount, nextRecurringDate, runSerializable } from "@/lib/finance";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
@@ -54,9 +55,10 @@ export async function createTransaction(data) {
       throw new Error("User not found");
     }
 
+    const input = transactionInput.parse(data);
     const account = await db.account.findFirst({
       where: {
-        id: data.accountId,
+        id: input.accountId,
         userId: user.id,
       },
     });
@@ -65,26 +67,25 @@ export async function createTransaction(data) {
       throw new Error("Account not found");
     }
 
-    // Calculate new balance
-    const balanceChange = data.type === "EXPENSE" ? -data.amount : data.amount;
-    const newBalance = account.balance.toNumber() + balanceChange;
+    const balanceChange = signedAmount(input.type, input.amount);
 
     // Create transaction and update account balance
-    const transaction = await db.$transaction(async (tx) => {
+    const transaction = await runSerializable(db, async (tx) => {
       const newTransaction = await tx.transaction.create({
         data: {
-          ...data,
+          ...input,
           userId: user.id,
+          recurringInterval: input.isRecurring ? input.recurringInterval : null,
           nextRecurringDate:
-            data.isRecurring && data.recurringInterval
-              ? calculateNextRecurringDate(data.date, data.recurringInterval)
+            input.isRecurring && input.recurringInterval
+              ? nextRecurringDate(input.date, input.recurringInterval)
               : null,
         },
       });
 
       await tx.account.update({
-        where: { id: data.accountId },
-        data: { balance: newBalance },
+        where: { id: input.accountId },
+        data: { balance: { increment: balanceChange } },
       });
 
       return newTransaction;
@@ -98,7 +99,6 @@ export async function createTransaction(data) {
     throw new Error(error.message);
   }
 }
-
 export async function getTransaction(id) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
@@ -132,55 +132,30 @@ export async function updateTransaction(id, data) {
 
     if (!user) throw new Error("User not found");
 
-    // Get original transaction to calculate balance change
-    const originalTransaction = await db.transaction.findFirst({
-      where: {
-        id,
-        userId: user.id,
-      },
-      include: {
-        account: true,
-      },
-    });
-
-    if (!originalTransaction) throw new Error("Transaction not found");
-
-    const targetAccount = await db.account.findFirst({
-      where: {
-        id: data.accountId,
-        userId: user.id,
-      },
-    });
-
-    if (!targetAccount) throw new Error("Account not found");
-
-    // Calculate balance changes
-    const oldBalanceChange =
-      originalTransaction.type === "EXPENSE"
-        ? -originalTransaction.amount.toNumber()
-        : originalTransaction.amount.toNumber();
-
-    const newBalanceChange =
-      data.type === "EXPENSE" ? -data.amount : data.amount;
-
-    const netBalanceChange = newBalanceChange - oldBalanceChange;
-
-    // Update transaction and account balance in a transaction
-    const transaction = await db.$transaction(async (tx) => {
+    const input = transactionInput.parse(data);
+    const { transaction, oldAccountId } = await runSerializable(db, async (tx) => {
+      const originalTransaction = await tx.transaction.findFirst({ where: { id, userId: user.id } });
+      if (!originalTransaction) throw new Error("Transaction not found");
+      const targetAccount = await tx.account.findFirst({ where: { id: input.accountId, userId: user.id } });
+      if (!targetAccount) throw new Error("Account not found");
+      const oldBalanceChange = signedAmount(originalTransaction.type, originalTransaction.amount);
+      const newBalanceChange = signedAmount(input.type, input.amount);
+      const netBalanceChange = newBalanceChange.minus(oldBalanceChange);
       const updated = await tx.transaction.update({
         where: { id },
         data: {
-          ...data,
+          ...input,
+          recurringInterval: input.isRecurring ? input.recurringInterval : null,
           nextRecurringDate:
-            data.isRecurring && data.recurringInterval
-              ? calculateNextRecurringDate(data.date, data.recurringInterval)
+            input.isRecurring && input.recurringInterval
+              ? nextRecurringDate(input.date, input.recurringInterval)
               : null,
         },
       });
 
-      if (originalTransaction.accountId === data.accountId) {
+      if (originalTransaction.accountId === input.accountId) {
         await tx.account.update({
-          where: { id: data.accountId },
+          where: { id: input.accountId },
           data: {
             balance: {
               increment: netBalanceChange,
@@ -192,13 +167,13 @@ export async function updateTransaction(id, data) {
           where: { id: originalTransaction.accountId },
           data: {
             balance: {
-              increment: -oldBalanceChange,
+              increment: oldBalanceChange.negated(),
             },
           },
         });
 
         await tx.account.update({
-          where: { id: data.accountId },
+          where: { id: input.accountId },
           data: {
             balance: {
               increment: newBalanceChange,
@@ -207,46 +182,14 @@ export async function updateTransaction(id, data) {
         });
       }
 
-      return updated;
+      return { transaction: updated, oldAccountId: originalTransaction.accountId };
     });
 
     revalidatePath("/dashboard");
-    revalidatePath(`/account/${data.accountId}`);
+    revalidatePath(`/account/${input.accountId}`);
+    if (oldAccountId !== input.accountId) revalidatePath(`/account/${oldAccountId}`);
 
     return { success: true, data: serializeAmount(transaction) };
-  } catch (error) {
-    throw new Error(error.message);
-  }
-}
-
-// Get User Transactions
-export async function getUserTransactions(query = {}) {
-  try {
-    const { userId } = await auth();
-    if (!userId) throw new Error("Unauthorized");
-
-    const user = await db.user.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    const transactions = await db.transaction.findMany({
-      where: {
-        userId: user.id,
-        ...query,
-      },
-      include: {
-        account: true,
-      },
-      orderBy: {
-        date: "desc",
-      },
-    });
-
-    return { success: true, data: transactions };
   } catch (error) {
     throw new Error(error.message);
   }
@@ -255,9 +198,26 @@ export async function getUserTransactions(query = {}) {
 // Scan Receipt
 export async function scanReceipt(file) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    // Convert File to ArrayBuffer
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized");
+    const req = await request();
+    const decision = await aj.protect(req, { userId, requested: 1 });
+    if (decision.isDenied()) throw new Error("Too many requests. Please try again later.");
+    if (!file || typeof file.arrayBuffer !== "function" || file.size > 4 * 1024 * 1024 || file.size === 0) {
+      throw new Error("Invalid receipt image");
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      throw new Error("Unsupported receipt image type");
+    }
     const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const isPng = bytes.length >= 8 && bytes.slice(0, 8).every((byte, index) => byte === [137, 80, 78, 71, 13, 10, 26, 10][index]);
+    const isWebp = String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+    if (!({ "image/jpeg": isJpeg, "image/png": isPng, "image/webp": isWebp }[file.type])) {
+      throw new Error("Invalid receipt image data");
+    }
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     // Convert ArrayBuffer to Base64
     const base64String = Buffer.from(arrayBuffer).toString("base64");
 
@@ -296,9 +256,9 @@ export async function scanReceipt(file) {
     const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
 
     try {
-      const data = JSON.parse(cleanedText);
+      const data = receiptResult.parse(JSON.parse(cleanedText));
       return {
-        amount: parseFloat(data.amount),
+        amount: data.amount.toFixed(2),
         date: new Date(data.date),
         description: data.description,
         category: data.category,
@@ -310,28 +270,6 @@ export async function scanReceipt(file) {
     }
   } catch (error) {
     console.error("Error scanning receipt:", error);
-    throw new Error("Failed to scan receipt");
+    throw new Error(error.message || "Failed to scan receipt");
   }
-}
-
-// Helper function to calculate next recurring date
-function calculateNextRecurringDate(startDate, interval) {
-  const date = new Date(startDate);
-
-  switch (interval) {
-    case "DAILY":
-      date.setDate(date.getDate() + 1);
-      break;
-    case "WEEKLY":
-      date.setDate(date.getDate() + 7);
-      break;
-    case "MONTHLY":
-      date.setMonth(date.getMonth() + 1);
-      break;
-    case "YEARLY":
-      date.setFullYear(date.getFullYear() + 1);
-      break;
-  }
-
-  return date;
 }

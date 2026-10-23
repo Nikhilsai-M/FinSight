@@ -49,6 +49,8 @@ model Transaction {
   recurringInterval RecurringInterval? // Only used if isRecurring is true
   nextRecurringDate DateTime?         // Next date for recurring transaction
   lastProcessed    DateTime?         // Last time this recurring transaction was processed
+  sourceTransactionId String?
+  scheduledFor      DateTime?
   status           TransactionStatus  @default(COMPLETED)
   userId           String
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -59,6 +61,9 @@ model Transaction {
 
   @@index([userId])
   @@index([accountId])
+  @@index([userId, date])
+  @@index([accountId, date])
+  @@unique([sourceTransactionId, scheduledFor])
   @@map("transactions")
 }
 
@@ -67,6 +72,7 @@ model Budget {
   id          String       @id @default(uuid())
   amount      Decimal
   lastAlertSent DateTime?  // Track when the last alert was sent
+  alertClaimedAt DateTime?
   userId      String       @unique
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt   DateTime     @default(now())

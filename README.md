@@ -74,7 +74,7 @@ Inngest powers scheduled and event-driven jobs for:
 
 ```text
 app/                    Next.js App Router pages and API routes
-actions/                Server actions for accounts, budgets, transactions, email, and seed data
+actions/                Server actions for accounts, budgets, transactions, and email
 components/             Shared UI components and landing/header sections
 data/                   Landing page content and categories
 emails/                 React Email templates
@@ -188,7 +188,9 @@ npm run lint
 ## Current Notes
 
 - The landing page and some UI copy still contain older `Welth` naming in a few places. The product itself is now branded as `FinSight`.
-- The seed endpoint exists at `/api/seed`, but the current seed script uses placeholder IDs and should be adjusted before relying on it.
+- The old placeholder seed endpoint was removed. There is no public seed route.
+- Apply the `20261023000000_finance_integrity` migration before deploying this version. It adds recurring-occurrence keys, alert claims, query indexes, and one-default-account enforcement. Use `npx prisma migrate deploy` in a deployment environment after reviewing the target database.
+- Receipt images are sent to Gemini to prefill transaction fields and are not stored by this app.
 
 ## Screenshot
 

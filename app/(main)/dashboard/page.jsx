@@ -9,7 +9,7 @@ import { Plus } from "lucide-react";
 import { DashboardOverview } from "./_components/transaction-overview";
 
 export default async function DashboardPage() {
-  const [accounts, transactions] = await Promise.all([
+  const [accounts, overviewByAccount] = await Promise.all([
     getUserAccounts(),
     getDashboardData(),
   ]);
@@ -33,7 +33,7 @@ export default async function DashboardPage() {
       {/* Dashboard Overview */}
       <DashboardOverview
         accounts={accounts}
-        transactions={transactions || []}
+        overviewByAccount={overviewByAccount || {}}
       />
 
       {/* Accounts Grid */}

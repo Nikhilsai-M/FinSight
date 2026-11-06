@@ -184,14 +184,3 @@ npm run build
 npm run start
 npm run lint
 ```
-
-## Current Notes
-
-- The landing page and some UI copy still contain older `Welth` naming in a few places. The product itself is now branded as `FinSight`.
-- The old placeholder seed endpoint was removed. There is no public seed route.
-- Apply the `20261023000000_finance_integrity` migration before deploying this version. It adds recurring-occurrence keys, alert claims, query indexes, and one-default-account enforcement. Use `npx prisma migrate deploy` in a deployment environment after reviewing the target database.
-- Receipt images are sent to Gemini to prefill transaction fields and are not stored by this app.
-
-## Screenshot
-
-<img width="1470" alt="FinSight dashboard preview" src="https://github.com/user-attachments/assets/1bc50b85-b421-4122-8ba4-ae68b2b61432">
